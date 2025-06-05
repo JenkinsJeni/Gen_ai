@@ -3,8 +3,8 @@ import os
 from datetime import datetime
 import warnings
 warnings.filterwarnings('ignore')
-directory = "C:/Jupyter_Projects"
-file_name = "Expenses_1"
+directory = "File_path"
+file_name = "File_name"
 class PersonalExpenseTracker:
    
     def __init__(self, directory):
@@ -460,6 +460,6 @@ class PersonalExpenseTracker:
 
 if __name__ == "__main__":
     
-    excel_file_path = "Expenses_1.xlsx"  
+    excel_file_path = "file_name_with_.xlsx_Extension"  
     tracker = PersonalExpenseTracker(excel_file_path)
     tracker.run()
