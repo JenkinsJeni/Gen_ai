@@ -1,0 +1,465 @@
+import pandas as pd
+import os
+from datetime import datetime
+import warnings
+warnings.filterwarnings('ignore')
+directory = "C:/Jupyter_Projects"
+file_name = "Expenses_1"
+class PersonalExpenseTracker:
+   
+    def __init__(self, directory):
+        
+        #Initialize the expense tracker with Excel file path
+        
+        self.excel_file_path = directory
+        self.expenses = []
+        self.monthly_budget = 0
+        self.load_expenses_from_excel()
+    
+    def load_expenses_from_excel(self):
+        
+        print(f"\n DIAGNOSTIC: Attempting to load from: {self.excel_file_path}")
+        
+        try:
+            # Check For file 
+            if not os.path.exists(self.excel_file_path):
+                print(f"File not found: {self.excel_file_path}")
+                print("Available files in current directory:")
+                for file in os.listdir('.'):
+                    if file.endswith(('.xlsx', '.xls')):
+                        print(f"{file}")
+                self.expenses = []
+                return
+            
+            print(f"File exists: {self.excel_file_path}")
+            
+            # Read Excel file and check all sheets
+            try:
+                excel_file = pd.ExcelFile(self.excel_file_path)
+                print(f"Available sheets: {excel_file.sheet_names}")
+            except Exception as e:
+                print(f"Cannot read Excel file: {str(e)}")
+                self.expenses = []
+                return
+            
+            # Try to find the expenses sheet with these keywords
+            possible_sheet_names = ['Expenses', 'expenses', 'Sheet1', 'Expense', 'Data', 'ExpenseData']
+            expenses_sheet = None
+            
+            for sheet_name in possible_sheet_names:
+                if sheet_name in excel_file.sheet_names:
+                    expenses_sheet = sheet_name
+                    print(f"Found expenses sheet: '{sheet_name}'")
+                    break
+            
+            if not expenses_sheet:
+                # Use the New sheet if no standard name found
+                expenses_sheet = excel_file.sheet_names[0]
+                print(f"Using first available sheet: '{expenses_sheet}'")
+            
+            # Read the expenses sheet
+            df = pd.read_excel(self.excel_file_path, sheet_name=expenses_sheet)
+            print(f"Sheet dimensions: {df.shape[0]} rows × {df.shape[1]} columns")
+            print(f"Column names: {list(df.columns)}")
+            
+            # Display first few rows for inspection
+            print("\n First 3 rows of data:")
+            print(df.head(3).to_string())
+            
+            # Try to map columns 
+            column_mapping = self._map_columns(df.columns)
+            print(f"\n Column mapping: {column_mapping}")
+            
+            # Convert DataFrame to list of dictionaries
+            self.expenses = []
+            for index, row in df.iterrows():
+                try:
+                    expense = {
+                        'date': self._clean_date(row[column_mapping['date']]),
+                        'category': str(row[column_mapping['category']]) if pd.notna(row[column_mapping['category']]) else '',
+                        'amount': float(row[column_mapping['amount']]) if pd.notna(row[column_mapping['amount']]) else 0.0,
+                        'description': str(row[column_mapping['description']]) if pd.notna(row[column_mapping['description']]) else ''
+                    }
+                    self.expenses.append(expense)
+                except Exception as e:
+                    print(f"Skipping row {index}: {str(e)}")
+                    continue
+            
+            # Try to load budget information
+            try:
+                if 'Budget' in excel_file.sheet_names:
+                    budget_df = pd.read_excel(self.excel_file_path, sheet_name='Budget')
+                    if not budget_df.empty and 'monthly_budget' in budget_df.columns:
+                        self.monthly_budget = float(budget_df['monthly_budget'].iloc[0])
+                else:
+                    self.monthly_budget = 0
+            except:
+                self.monthly_budget = 0
+            
+            print(f"\n Successfully loaded {len(self.expenses)} expenses from {self.excel_file_path}")
+            if self.monthly_budget > 0:
+                print(f" Monthly budget loaded: ${self.monthly_budget:.2f}")
+            
+            # Show sample of loaded data
+            if self.expenses:
+                print("\n Sample loaded expense:")
+                sample = self.expenses[0]
+                print(f"   Date: {sample['date']}")
+                print(f"   Category: {sample['category']}")
+                print(f"   Amount: ${sample['amount']:.2f}")
+                print(f"   Description: {sample['description']}")
+                
+        except Exception as e:
+            print(f" Error loading expenses: {str(e)}")
+            print(f" Error details: {type(e).__name__}")
+            self.expenses = []
+    
+    def _map_columns(self, columns):
+    
+        mapping = {'date': None, 'category': None, 'amount': None, 'description': None}
+        columns_lower = [col.lower().strip() for col in columns]
+        
+        # Map date column
+        date_keywords = ['date', 'when', 'time', 'day']
+        for i, col in enumerate(columns_lower):
+            if any(keyword in col for keyword in date_keywords):
+                mapping['date'] = columns[i]
+                break
+        if not mapping['date'] and len(columns) > 0:
+            mapping['date'] = columns[0]  # Default to first column
+        
+        # Map category column
+        category_keywords = ['category', 'type', 'cat', 'group']
+        for i, col in enumerate(columns_lower):
+            if any(keyword in col for keyword in category_keywords):
+                mapping['category'] = columns[i]
+                break
+        if not mapping['category'] and len(columns) > 1:
+            mapping['category'] = columns[1]  # Default to second column
+        
+        # Map amount column
+        amount_keywords = ['amount', 'cost', 'price', 'expense', 'money', 'value']
+        for i, col in enumerate(columns_lower):
+            if any(keyword in col for keyword in amount_keywords):
+                mapping['amount'] = columns[i]
+                break
+        if not mapping['amount'] and len(columns) > 2:
+            mapping['amount'] = columns[2]  # Default to third column
+        
+        # Map description column
+        desc_keywords = ['description', 'desc', 'note', 'detail', 'comment']
+        for i, col in enumerate(columns_lower):
+            if any(keyword in col for keyword in desc_keywords):
+                mapping['description'] = columns[i]
+                break
+        if not mapping['description'] and len(columns) > 3:
+            mapping['description'] = columns[3]  # Default to fourth column
+        elif not mapping['description']:
+            mapping['description'] = mapping['category']  # Use category as fallback
+        
+        return mapping
+    
+    def _clean_date(self, date_value):
+        
+        if pd.isna(date_value):
+            return datetime.now().strftime('%Y-%m-%d')
+        
+        try:
+            # If it's already a datetime
+            if isinstance(date_value, datetime):
+                return date_value.strftime('%Y-%m-%d')
+            
+            # If it's a string, try to parse it
+            date_str = str(date_value).strip()
+            
+            # Try different date formats
+            formats = ['%Y-%m-%d', '%m/%d/%Y', '%d/%m/%Y', '%Y/%m/%d', '%m-%d-%Y', '%d-%m-%Y']
+            
+            for fmt in formats:
+                try:
+                    parsed_date = datetime.strptime(date_str, fmt)
+                    return parsed_date.strftime('%Y-%m-%d')
+                except:
+                    continue
+            
+            # If all else fails, return today's date
+            return datetime.now().strftime('%Y-%m-%d')
+            
+        except:
+            return datetime.now().strftime('%Y-%m-%d')
+    
+    def add_expense(self):
+       
+        print("\n" + "="*50)
+        print("           ADD NEW EXPENSE")
+        print("="*50)
+        
+        try:
+            # Get expense details from user
+            date = input("Enter date (YYYY-MM-DD) or press Enter for today: ").strip()
+            if not date:
+                date = datetime.now().strftime('%Y-%m-%d')
+            else:
+                # Validate date format
+                datetime.strptime(date, '%Y-%m-%d')
+            
+            category = input("Enter category (e.g., Food, Travel, Entertainment): ").strip()
+            if not category:
+                print(" Category cannot be empty!")
+                return
+            
+            amount_str = input("Enter amount spent: $").strip()
+            amount = float(amount_str)
+            if amount <= 0:
+                print("Amount must be greater than 0!")
+                return
+            
+            description = input("Enter description: ").strip()
+            if not description:
+                print("Description cannot be empty!")
+                return
+            
+            # Create expense dictionary
+            new_expense = {
+                'date': date,
+                'category': category,
+                'amount': amount,
+                'description': description
+            }
+            
+            # Add to expenses list
+            self.expenses.append(new_expense)
+            
+            # Save to Excel file immediately
+            self.save_expenses_to_excel()
+            
+            print(f"Expense added successfully!")
+            print(f"Date: {date} | Category: {category} | Amount: ${amount:.2f}")
+            print(f"Description: {description}")
+            
+        except ValueError as e:
+            print(f"Invalid input: {str(e)}")
+        except Exception as e:
+            print(f"Error adding expense: {str(e)}")
+    
+    def view_expenses(self):
+       
+        print("\n" + "="*80)
+        print("                           YOUR EXPENSE HISTORY")
+        print("="*80)
+        
+        if not self.expenses:
+            print("No expenses recorded yet. Add some expenses to get started!")
+            return
+        
+        # Filter out invalid expenses
+        valid_expenses = []
+        invalid_count = 0
+        
+        for expense in self.expenses:
+            # Validate required fields
+            if (expense.get('date') and 
+                expense.get('category') and 
+                expense.get('amount') is not None and 
+                expense.get('description')):
+                valid_expenses.append(expense)
+            else:
+                invalid_count += 1
+        
+        if invalid_count > 0:
+            print(f" {invalid_count} incomplete expense entries were skipped.")
+        
+        if not valid_expenses:
+            print(" No valid expenses found!")
+            return
+        
+        # Display expenses in table format
+        print(f"{'Date':<12} {'Category':<15} {'Amount':<10} {'Description':<30}")
+        print("-" * 80)
+        
+        total_amount = 0
+        category_totals = {}
+        
+        for expense in valid_expenses:
+            date = expense['date']
+            category = expense['category']
+            amount = expense['amount']
+            description = expense['description']
+            
+            # Truncate description if too long
+            if len(description) > 27:
+                description = description[:27] + "..."
+            
+            print(f"{date:<12} {category:<15} ${amount:<9.2f} {description:<30}")
+            
+            # Calculate totals
+            total_amount += amount
+            category_totals[category] = category_totals.get(category, 0) + amount
+        
+        # Display summary
+        print("-" * 80)
+        print(f"SUMMARY:")
+        print(f"   Total Expenses: ${total_amount:.2f}")
+        print(f"   Number of Transactions: {len(valid_expenses)}")
+        
+        print(f"\n SPENDING BY CATEGORY:")
+        for category, amount in sorted(category_totals.items(), key=lambda x: x[1], reverse=True):
+            percentage = (amount / total_amount) * 100
+            print(f"   {category}: ${amount:.2f} ({percentage:.1f}%)")
+    
+    def set_monthly_budget(self):
+    
+        print("\n" + "="*50)
+        print("           SET MONTHLY BUDGET")
+        print("="*50)
+        
+        try:
+            budget_str = input("Enter your monthly budget: $").strip()
+            budget = float(budget_str)
+            
+            if budget <= 0:
+                print("Budget must be greater than 0!")
+                return
+            
+            self.monthly_budget = budget
+            self.save_expenses_to_excel()  # Save budget to Excel
+            
+            print(f"Monthly budget set to: ${budget:.2f}")
+            self.track_budget()
+            
+        except ValueError:
+            print("Please enter a valid number!")
+        except Exception as e:
+            print(f"Error setting budget: {str(e)}")
+    
+    def track_budget(self):
+        
+        print("\n" + "="*50)
+        print("           BUDGET TRACKING")
+        print("="*50)
+        
+        if self.monthly_budget <= 0:
+            print(" No monthly budget set! Please set a budget first.")
+            choice = input("Would you like to set a budget now? (y/n): ").lower().strip()
+            if choice == 'y':
+                self.set_monthly_budget()
+            return
+        
+        # Calculate current month's expenses
+        current_month = datetime.now().strftime('%Y-%m')
+        monthly_expenses = []
+        
+        for expense in self.expenses:
+            if expense.get('date') and expense.get('amount') is not None:
+                expense_date = expense['date'][:7]  # Get YYYY-MM part
+                if expense_date == current_month:
+                    monthly_expenses.append(expense)
+        
+        total_spent = sum(expense['amount'] for expense in monthly_expenses)
+        remaining = self.monthly_budget - total_spent
+        percentage_used = (total_spent / self.monthly_budget) * 100
+        
+        print(f" Budget Period: {current_month}")
+        print(f" Monthly Budget: ${self.monthly_budget:.2f}")
+        print(f" Total Spent: ${total_spent:.2f}")
+        print(f" Budget Used: {percentage_used:.1f}%")
+        
+        if total_spent > self.monthly_budget:
+            overspend = total_spent - self.monthly_budget
+            print(f" WARNING: You have exceeded your budget by ${overspend:.2f}!")
+            print(f" Consider reviewing your spending habits.")
+        else:
+            print(f"✅ Remaining Budget: ${remaining:.2f}")
+            if percentage_used > 80:
+                print(f"  You've used {percentage_used:.1f}% of your budget. Be careful!")
+            elif percentage_used > 50:
+                print(f" You're halfway through your budget.")
+        
+        # Show transactions for current month
+        if monthly_expenses:
+            print(f"\n This Month's Transactions ({len(monthly_expenses)}):")
+            for expense in monthly_expenses[-5:]:  # Show last 5 transactions
+                print(f"   {expense['date']} - {expense['category']}: ${expense['amount']:.2f}")
+            if len(monthly_expenses) > 5:
+                print(f"   ... and {len(monthly_expenses) - 5} more transactions")
+    
+    def save_expenses_to_excel(self):
+
+        try:
+            # Create expenses DataFrame
+            if self.expenses:
+                expenses_df = pd.DataFrame(self.expenses)
+            else:
+                # Create empty DataFrame with correct columns
+                expenses_df = pd.DataFrame(columns=['date', 'category', 'amount', 'description'])
+            
+            # Create budget DataFrame
+            budget_df = pd.DataFrame({'monthly_budget': [self.monthly_budget]})
+            
+            # Write to Excel file with multiple sheets
+            with pd.ExcelWriter(self.excel_file_path, engine='openpyxl') as writer:
+                expenses_df.to_excel(writer, sheet_name='Expenses', index=False)
+                budget_df.to_excel(writer, sheet_name='Budget', index=False)
+            
+            print(f" Data saved successfully to {self.excel_file_path}")
+            
+        except Exception as e:
+            print(f" Error saving to Excel: {str(e)}")
+    
+    def display_menu(self):
+        """
+        Display the main menu options
+        """
+        print("\n" + "="*60)
+        print("              PERSONAL EXPENSE TRACKER")
+        print("="*60)
+        print("1.Add Expense")
+        print("2.View Expenses") 
+        print("3.Set Monthly Budget")
+        print("4.Track Budget")
+        print("5.Save & Exit")
+        print("="*60)
+    
+    def run(self):
+       
+        print(" Welcome to Personal Expense Tracker!")
+        
+        while True:
+            self.display_menu()
+            
+            try:
+                choice = input("Enter your choice (1-5): ").strip()
+                
+                if choice == '1':
+                    self.add_expense()
+                elif choice == '2':
+                    self.view_expenses()
+                elif choice == '3':
+                    self.set_monthly_budget()
+                elif choice == '4':
+                    self.track_budget()
+                elif choice == '5':
+                    print("\n Saving data...")
+                    self.save_expenses_to_excel()
+                    print(" Thank you for using Personal Expense Tracker!")
+                    print(" Your data has been saved to:", self.excel_file_path)
+                    break
+                else:
+                    print("Invalid choice! Please enter a number between 1-5.")
+                
+                # Pause before showing menu again
+                input("\nPress Enter to continue...")
+                
+            except KeyboardInterrupt:
+                print("\n\n Saving data before exit...")
+                self.save_expenses_to_excel()
+                print(" Goodbye!")
+                break
+            except Exception as e:
+                print(f"An error occurred: {str(e)}")
+
+if __name__ == "__main__":
+    
+    excel_file_path = "Expenses_1.xlsx"  
+    tracker = PersonalExpenseTracker(excel_file_path)
+    tracker.run()
